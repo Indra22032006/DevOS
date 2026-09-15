@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+
+import sys
+
+
+def show_help():
+    print("""
+DevOS — Developer Operating System
+
+Usage:
+    devos <command>
+
+Rollback:
+    setroll [message]     Create a rollback snapshot
+    rollist               List rollback snapshots
+    rollback [ID]         Restore a rollback snapshot
+
+Utilities:
+    help                  Show this help message
+    version               Show DevOS version
+""")
+
+
+def main():
+    if len(sys.argv) < 2:
+        show_help()
+        return
+
+    command = sys.argv[1]
+
+    if command == "help":
+        show_help()
+
+    elif command == "version":
+        print("DevOS 0.1.0")
+
+    elif command == "setroll":
+        print("Rollback functionality coming soon.")
+
+    elif command == "rollist":
+        print("Rollback list coming soon.")
+
+    elif command == "rollback":
+        print("Rollback functionality coming soon.")
+
+    elif command == "springroll":
+        print("how did you even find this?")
+
+    elif command == "coffee":
+        print("Don't overdose on caffeine.")
+        answer = input("Have you drunk coffee today? [y/N] ")
+
+        if answer.lower() == "y":
+            print("That's probably enough.")
+        else:
+            print("Carry on, developer.")
+
+    else:
+        print(f"devos: unknown command '{command}'")
+        print("Run 'devos help' for available commands.")
+
+
+if __name__ == "__main__":
+    main()

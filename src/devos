@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 
 import sys
+import os
+import json
+import shutil
+from datetime import datetime
 
 
 def show_help():
@@ -14,12 +18,242 @@ Rollback:
     setroll [message]     Create a rollback snapshot
     rollist               List rollback snapshots
     rollback [ID]         Restore a rollback snapshot
+    delicious <ID>        Delete a rollback snapshot
+    delicious <A,B>       Delete snapshots from A through B
 
 Utilities:
     help                  Show this help message
     version               Show DevOS version
 """)
 
+def create_snapshot(message=""):
+    project_dir = os.getcwd()
+    devos_dir = os.path.join(project_dir, ".devos")
+    snapshots_dir = os.path.join(devos_dir, "snapshots")
+    metadata_file = os.path.join(devos_dir, "metadata.json")
+
+    os.makedirs(snapshots_dir, exist_ok=True)
+
+    if os.path.exists(metadata_file):
+        with open(metadata_file, "r") as f:
+            metadata = json.load(f)
+    else:
+        metadata = {
+            "version": 1,
+            "snapshots": []
+        }
+
+    snapshot_id = max(
+        (snapshot["id"] for snapshot in metadata["snapshots"]),
+        default=0
+    ) + 1
+
+    temp_dir = os.path.join(snapshots_dir, f".tmp-{snapshot_id}")
+    snapshot_dir = os.path.join(snapshots_dir, str(snapshot_id))
+
+    try:
+        os.makedirs(temp_dir)
+
+        for item in os.listdir(project_dir):
+            if item == ".devos":
+                continue
+
+            source = os.path.join(project_dir, item)
+            destination = os.path.join(temp_dir, item)
+
+            if os.path.isdir(source):
+                shutil.copytree(source, destination)
+            else:
+                shutil.copy2(source, destination)
+
+        os.rename(temp_dir, snapshot_dir)
+
+        snapshot = {
+            "id": snapshot_id,
+            "message": message,
+            "timestamp": datetime.now().isoformat(timespec="seconds")
+        }
+
+        metadata["snapshots"].append(snapshot)
+
+        with open(metadata_file, "w") as f:
+            json.dump(metadata, f, indent=4)
+
+        print(f"Created rollback snapshot {snapshot_id}")
+
+    except Exception as e:
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+
+        print(f"Snapshot creation failed: {e}")
+
+def list_snapshots():
+    project_dir = os.getcwd()
+    devos_dir = os.path.join(project_dir, ".devos")
+    metadata_file = os.path.join(devos_dir, "metadata.json")
+
+    if not os.path.exists(metadata_file):
+        print("No DevOS rollback snapshots found.")
+        return
+
+    with open(metadata_file, "r") as f:
+        metadata = json.load(f)
+
+    snapshots = metadata.get("snapshots", [])
+
+    if not snapshots:
+        print("No DevOS rollback snapshots found.")
+        return
+
+    print("DevOS Rollback Snapshots")
+    print("─" * 60)
+    print(f"{'ID':<6}{'Timestamp':<22}Message")
+    print("─" * 60)
+
+    for snapshot in snapshots:
+        print(
+            f"{snapshot['id']:<6}"
+            f"{snapshot['timestamp']:<22}"
+            f"{snapshot['message']}"
+        )
+
+def delete_snapshot(snapshot_ids):
+    project_dir = os.getcwd()
+    devos_dir = os.path.join(project_dir, ".devos")
+    snapshots_dir = os.path.join(devos_dir, "snapshots")
+    metadata_file = os.path.join(devos_dir, "metadata.json")
+
+    if not os.path.exists(metadata_file):
+        print("No DevOS rollback snapshots found.")
+        return
+
+    with open(metadata_file, "r") as f:
+        metadata = json.load(f)
+
+    snapshots = metadata.get("snapshots", [])
+
+    if not snapshots:
+        print("No DevOS rollback snapshots found.")
+        return
+
+    if len(snapshots) == 1:
+        print("Cannot delete the last remaining snapshot.")
+        return
+
+    existing_ids = {snapshot["id"] for snapshot in snapshots}
+
+    for snapshot_id in snapshot_ids:
+        if snapshot_id not in existing_ids:
+            print(f"Snapshot {snapshot_id} not found.")
+            return
+
+    print("The following snapshots will be deleted:")
+
+    for snapshot_id in snapshot_ids:
+        for snapshot in snapshots:
+            if snapshot["id"] == snapshot_id:
+                print(
+                    f"  {snapshot['id']}: "
+                    f"{snapshot['timestamp']} - "
+                    f"{snapshot['message']}"
+                )
+                break
+
+    answer = input("Continue? [y/N] ")
+
+    if answer.lower() != "y":
+        print("Deletion cancelled.")
+        return
+
+    for snapshot_id in snapshot_ids:
+        snapshot_dir = os.path.join(snapshots_dir, str(snapshot_id))
+
+        if os.path.exists(snapshot_dir):
+            shutil.rmtree(snapshot_dir)
+
+    metadata["snapshots"] = [
+        snapshot
+        for snapshot in snapshots
+        if snapshot["id"] not in snapshot_ids
+    ]
+
+    with open(metadata_file, "w") as f:
+        json.dump(metadata, f, indent=4)
+
+    print(f"Deleted {len(snapshot_ids)} snapshot(s).")
+
+def rollback_snapshot(snapshot_id=None):
+    project_dir = os.getcwd()
+    devos_dir = os.path.join(project_dir, ".devos")
+    snapshots_dir = os.path.join(devos_dir, "snapshots")
+    metadata_file = os.path.join(devos_dir, "metadata.json")
+
+    if not os.path.exists(metadata_file):
+        print("No DevOS rollback snapshots found.")
+        return
+
+    with open(metadata_file, "r") as f:
+        metadata = json.load(f)
+
+    snapshots = metadata.get("snapshots", [])
+
+    if not snapshots:
+        print("No DevOS rollback snapshots found.")
+        return
+
+    # If no ID was supplied, use the latest snapshot.
+    if snapshot_id is None:
+        snapshot = snapshots[-1]
+    else:
+        snapshot = None
+
+        for item in snapshots:
+            if item["id"] == snapshot_id:
+                snapshot = item
+                break
+
+        if snapshot is None:
+            print(f"Snapshot {snapshot_id} not found.")
+            return
+
+    selected_id = snapshot["id"]
+    snapshot_dir = os.path.join(snapshots_dir, str(selected_id))
+
+    if not os.path.exists(snapshot_dir):
+        print(f"Snapshot {selected_id} could not be found.")
+        return
+
+    print(f"You are about to restore snapshot {selected_id}.")
+    print(f"Message: {snapshot['message']}")
+    print("Current project changes will be overwritten.")
+
+    answer = input("Continue? [y/N] ")
+
+    if answer.lower() != "y":
+        print("Rollback cancelled.")
+        return
+
+    for item in os.listdir(project_dir):
+        if item == ".devos":
+            continue
+
+        path = os.path.join(project_dir, item)
+
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+
+    for item in os.listdir(snapshot_dir):
+        source = os.path.join(snapshot_dir, item)
+        destination = os.path.join(project_dir, item)
+
+        if os.path.isdir(source):
+            shutil.copytree(source, destination)
+        else:
+            shutil.copy2(source, destination)
+
+    print(f"Rolled back to snapshot {selected_id}")
 
 def main():
     if len(sys.argv) < 2:
@@ -35,13 +269,48 @@ def main():
         print("DevOS 0.1.0")
 
     elif command == "setroll":
-        print("Rollback functionality coming soon.")
+    	message = " ".join(sys.argv[2:])
+    	create_snapshot(message)
 
     elif command == "rollist":
-        print("Rollback list coming soon.")
+        list_snapshots()
 
     elif command == "rollback":
-        print("Rollback functionality coming soon.")
+    	if len(sys.argv) > 2:
+        	try:
+            		snapshot_id = int(sys.argv[2])
+            		rollback_snapshot(snapshot_id)
+        	except ValueError:
+            		print("devos: snapshot ID must be a number.")
+    	else:
+        	rollback_snapshot()
+
+    elif command == "delicious":
+        if len(sys.argv) < 3:
+            print("Usage: devos delicious <ID> or devos delicious <start,end>")
+            return
+
+        try:
+            argument = sys.argv[2]
+
+            if "," in argument:
+                start, end = argument.split(",", 1)
+                start = int(start)
+                end = int(end)
+
+                if start > end:
+                    print("devos: start ID must not be greater than end ID.")
+                    return
+
+                snapshot_ids = list(range(start, end + 1))
+
+            else:
+                snapshot_ids = [int(argument)]
+
+            delete_snapshot(snapshot_ids)
+
+        except ValueError:
+            print("devos: snapshot ID must be a number or range.")
 
     elif command == "springroll":
         print("how did you even find this?")
